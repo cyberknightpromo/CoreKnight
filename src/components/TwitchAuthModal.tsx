@@ -194,7 +194,7 @@ export const TwitchAuthModal: React.FC<TwitchAuthModalProps> = ({
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-slate-300 flex items-center gap-1.5">
                 <Key className="w-3.5 h-3.5 text-slate-400" />
-                OAuth Redirect URI (For Twitch Dev Console)
+                OAuth Redirect URIs (Add to Twitch Dev Console)
               </span>
               <a
                 href="https://dev.twitch.tv/console/apps"
@@ -206,17 +206,44 @@ export const TwitchAuthModal: React.FC<TwitchAuthModalProps> = ({
               </a>
             </div>
 
-            <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg p-2">
-              <code className="text-xs font-mono text-slate-300 flex-1 truncate select-all">
-                {currentCallbackUrl}
-              </code>
-              <button
-                onClick={handleCopyCallback}
-                className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-                <span>{copied ? 'Copied' : 'Copy'}</span>
-              </button>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg p-2">
+                <div className="flex-1 truncate">
+                  <span className="text-[10px] text-slate-500 font-sans block">Production Vercel Domain:</span>
+                  <code className="text-xs font-mono text-slate-300 select-all">
+                    https://coreknight.vercel.app/auth/callback
+                  </code>
+                </div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText('https://coreknight.vercel.app/auth/callback');
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer shrink-0"
+                >
+                  <Copy className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Copy Vercel URI</span>
+                </button>
+              </div>
+
+              {window.location.host !== 'coreknight.vercel.app' && (
+                <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg p-2">
+                  <div className="flex-1 truncate">
+                    <span className="text-[10px] text-slate-500 font-sans block">Current Environment URI:</span>
+                    <code className="text-xs font-mono text-slate-300 select-all">
+                      {currentCallbackUrl}
+                    </code>
+                  </div>
+                  <button
+                    onClick={handleCopyCallback}
+                    className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer shrink-0"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                    <span>{copied ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="pt-2">
