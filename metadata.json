@@ -1,0 +1,6 @@
+{
+  "name": "CoreKnight Translator",
+  "description": "Twitch chat translator bot created by CyberKnight, powered by Gemini AI to translate live chat into any chosen language.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
