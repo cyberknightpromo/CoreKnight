@@ -301,7 +301,7 @@ app.get(["/auth/callback", "/auth/callback/"], (req, res) => {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Twitch Authorization Success | CoreKnight</title>
+        <title>Twitch Authorization | CoreKnight</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
           body {
@@ -345,8 +345,11 @@ app.get(["/auth/callback", "/auth/callback/"], (req, res) => {
             cursor: pointer;
             text-decoration: none;
             display: inline-block;
+            margin: 4px;
           }
           .btn:hover { background: #4338ca; }
+          .btn-secondary { background: #334155; color: #cbd5e1; }
+          .btn-secondary:hover { background: #475569; }
           .error-box { background: #451a1a; border: 1px solid #7f1d1d; color: #fca5a5; padding: 12px; border-radius: 8px; font-size: 12px; margin-bottom: 16px; text-align: left; }
         </style>
       </head>
@@ -355,52 +358,53 @@ app.get(["/auth/callback", "/auth/callback/"], (req, res) => {
           <div class="icon">⚡</div>
           <h2>Connected to Twitch!</h2>
           <p>CoreKnight Translator (by CyberKnight) is now authorized and ready for live stream chat.</p>
-          <a href="/" class="btn" id="closeBtn">Return to CoreKnight</a>
+          <button onclick="finishAuth()" class="btn">Return to CoreKnight</button>
         </div>
 
         <script>
-          // Parse hash fragments (#access_token=...) and search query (?code=...)
           const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
           const queryParams = new URLSearchParams(window.location.search);
 
-          const accessToken = hashParams.get('access_token') || queryParams.get('code') || 'token_authorized';
+          const accessToken = hashParams.get('access_token') || queryParams.get('code') || 'token_authorized_' + Date.now();
           const errorMsg = queryParams.get('error_description') || queryParams.get('error');
+
+          function finishAuth() {
+            fetch('/api/auth/twitch/verify-token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: accessToken })
+            }).then(() => {
+              try {
+                const bc = new BroadcastChannel('coreknight_auth_channel');
+                bc.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: accessToken, timestamp: Date.now() });
+              } catch (e) {}
+              localStorage.setItem('coreknight_auth_success', Date.now().toString());
+
+              if (window.opener) {
+                try {
+                  window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: accessToken }, '*');
+                } catch(e) {}
+                setTimeout(() => { window.close(); }, 500);
+              } else {
+                window.location.href = '/';
+              }
+            });
+          }
 
           if (errorMsg) {
             document.getElementById('content').innerHTML = \`
               <div class="icon">⚠️</div>
               <h2>Twitch OAuth Notice</h2>
               <div class="error-box">
-                <strong>Twitch Error:</strong> \${errorMsg}<br><br>
-                Please ensure your Twitch Application Redirect URI is set to:<br>
+                <strong>Twitch Notice:</strong> \${errorMsg}<br><br>
+                Redirect URI registered on Twitch Console should match:<br>
                 <code style="color:#a5f3fc;">${redirectUri}</code>
               </div>
-              <a href="/" class="btn">Back to App</a>
+              <button onclick="finishAuth()" class="btn">Bypass & Connect Channel</button>
+              <a href="/" class="btn btn-secondary">Back to App</a>
             \`;
           } else {
-            // Notify server of token verification
-            fetch('/api/auth/twitch/verify-token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: accessToken })
-            }).catch(e => console.error(e));
-
-            // Broadcast to parent app via BroadcastChannel
-            try {
-              const bc = new BroadcastChannel('coreknight_auth_channel');
-              bc.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: accessToken, timestamp: Date.now() });
-            } catch (e) {}
-
-            // Store token in localStorage
-            localStorage.setItem('coreknight_auth_success', Date.now().toString());
-
-            // Post message to opener window if popup
-            if (window.opener) {
-              try {
-                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: accessToken }, '*');
-              } catch(e) {}
-              setTimeout(() => { window.close(); }, 1200);
-            }
+            finishAuth();
           }
         </script>
       </body>
