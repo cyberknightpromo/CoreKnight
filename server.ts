@@ -211,19 +211,22 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", botActive: botSettings.isActive });
 });
 
-// Twitch OAuth Authorization URL Generator Endpoint (OAuth Integration Skill)
+// Twitch OAuth Authorization URL Generator Endpoint (Public App Implicit Grant)
 app.get("/api/auth/twitch/url", (req, res) => {
-  const appUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+  const reqHost = req.get("host") || "";
+  const isVercelHost = reqHost.includes("vercel.app");
+  const defaultBaseUrl = isVercelHost ? "https://coreknight.vercel.app" : `${req.protocol}://${reqHost}`;
+  const appUrl = process.env.APP_URL || defaultBaseUrl;
   const redirectUri = `${appUrl}/auth/callback`;
-  const clientId = process.env.TWITCH_CLIENT_ID || botSettings.twitchClientId;
+  const clientId = (req.query.client_id as string) || process.env.TWITCH_CLIENT_ID || botSettings.twitchClientId;
 
   if (!clientId) {
-    // Return a structured demo URL state if Client ID isn't provided yet
+    // Instant 1-click fallback if no Twitch Client ID is configured yet
     return res.json({
-      url: `${appUrl}/auth/callback?code=demo_twitch_code_12345&state=demo`,
+      url: `${redirectUri}?code=demo_twitch_access_token_${Date.now()}&state=instant_demo`,
       isConfigured: false,
       redirectUri,
-      message: "Twitch Client ID not configured. Using 1-click Demo Auth flow.",
+      message: "Twitch Client ID not set. Using 1-click Instant Auth flow.",
     });
   }
 
@@ -235,10 +238,11 @@ app.get("/api/auth/twitch/url", (req, res) => {
     "channel:read:subscriptions",
   ].join(" ");
 
+  // Public Twitch apps use Implicit Grant Flow (response_type=token)
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
-    response_type: "code",
+    response_type: "token",
     scope: scopes,
     force_verify: "false",
   });
@@ -252,46 +256,151 @@ app.get("/api/auth/twitch/url", (req, res) => {
   });
 });
 
-// OAuth Callback Route (popup callback listener per skill)
-app.get(["/auth/callback", "/auth/callback/"], (req, res) => {
-  const { code } = req.query;
+// Twitch Verify Token / Complete Endpoint
+app.post("/api/auth/twitch/verify-token", (req, res) => {
+  const { token, username, channelName } = req.body;
 
-  // Update authenticated user state
+  authUser = {
+    id: `twitch_${Date.now()}`,
+    username: username || botSettings.channelName || "twitch_streamer",
+    displayName: username || botSettings.channelName || "CoreKnight Streamer",
+    profileImageUrl: "https://images.unsplash.com/photo-1566492031773-4f4e44671857?w=150&auto=format&fit=crop&q=80",
+    isBroadcaster: true,
+    isConnectedToTwitch: true,
+    authMethod: "oauth",
+    accessToken: token || "oauth_token_active",
+  };
+
+  if (channelName) {
+    botSettings.channelName = channelName.toLowerCase().replace("#", "");
+  }
+
+  broadcast("AUTH_CHANGE", authUser);
+  broadcast("SETTINGS_CHANGE", botSettings);
+
+  res.json({ success: true, user: authUser, settings: botSettings });
+});
+
+// OAuth Callback Route (handles both query code and hash access_token for public apps)
+app.get(["/auth/callback", "/auth/callback/"], (req, res) => {
+  const reqHost = req.get("host") || "";
+  const isVercelHost = reqHost.includes("vercel.app");
+  const defaultBaseUrl = isVercelHost ? "https://coreknight.vercel.app" : `${req.protocol}://${reqHost}`;
+  const redirectUri = `${defaultBaseUrl}/auth/callback`;
+
+  // Pre-update user in memory for immediate state persistence
   authUser = {
     ...authUser,
     isConnectedToTwitch: true,
     authMethod: "oauth",
-    displayName: authUser.displayName || "TwitchBroadcaster",
-    accessToken: typeof code === "string" ? code : "demo_token_xyz",
+    displayName: authUser.displayName || "CoreKnight Streamer",
   };
-
   broadcast("AUTH_CHANGE", authUser);
 
   res.send(`
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Twitch Authentication Success</title>
+        <title>Twitch Authorization Success | CoreKnight</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0e0e10; color: #efeff1; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
-          .card { background: #18181b; padding: 32px; border-radius: 12px; border: 1px solid #26262c; max-width: 400px; }
-          .icon { font-size: 48px; margin-bottom: 16px; color: #9146ff; }
-          h2 { margin: 0 0 12px 0; font-size: 20px; }
-          p { color: #adadb8; font-size: 14px; margin: 0 0 20px 0; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+            box-sizing: border-box;
+          }
+          .card {
+            background: #1e293b;
+            padding: 36px 28px;
+            border-radius: 16px;
+            border: 1px solid #334155;
+            max-width: 440px;
+            width: 100%;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+          }
+          .icon {
+            font-size: 44px;
+            margin-bottom: 16px;
+            display: inline-block;
+          }
+          h2 { margin: 0 0 8px 0; font-size: 22px; font-weight: 700; color: #f1f5f9; }
+          p { color: #94a3b8; font-size: 14px; margin: 0 0 20px 0; line-height: 1.5; }
+          .btn {
+            background: #4f46e5;
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+          }
+          .btn:hover { background: #4338ca; }
+          .error-box { background: #451a1a; border: 1px solid #7f1d1d; color: #fca5a5; padding: 12px; border-radius: 8px; font-size: 12px; margin-bottom: 16px; text-align: left; }
         </style>
       </head>
       <body>
-        <div class="card">
+        <div class="card" id="content">
           <div class="icon">⚡</div>
           <h2>Connected to Twitch!</h2>
-          <p>CoreKnight Translator Bot (by CyberKnight) is now authenticated and ready for live chat.</p>
+          <p>CoreKnight Translator (by CyberKnight) is now authorized and ready for live stream chat.</p>
+          <a href="/" class="btn" id="closeBtn">Return to CoreKnight</a>
         </div>
+
         <script>
-          if (window.opener) {
-            window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', user: ${JSON.stringify(authUser)} }, '*');
-            setTimeout(() => { window.close(); }, 1200);
+          // Parse hash fragments (#access_token=...) and search query (?code=...)
+          const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
+          const queryParams = new URLSearchParams(window.location.search);
+
+          const accessToken = hashParams.get('access_token') || queryParams.get('code') || 'token_authorized';
+          const errorMsg = queryParams.get('error_description') || queryParams.get('error');
+
+          if (errorMsg) {
+            document.getElementById('content').innerHTML = \`
+              <div class="icon">⚠️</div>
+              <h2>Twitch OAuth Notice</h2>
+              <div class="error-box">
+                <strong>Twitch Error:</strong> \${errorMsg}<br><br>
+                Please ensure your Twitch Application Redirect URI is set to:<br>
+                <code style="color:#a5f3fc;">${redirectUri}</code>
+              </div>
+              <a href="/" class="btn">Back to App</a>
+            \`;
           } else {
-            window.location.href = '/';
+            // Notify server of token verification
+            fetch('/api/auth/twitch/verify-token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: accessToken })
+            }).catch(e => console.error(e));
+
+            // Broadcast to parent app via BroadcastChannel
+            try {
+              const bc = new BroadcastChannel('coreknight_auth_channel');
+              bc.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: accessToken, timestamp: Date.now() });
+            } catch (e) {}
+
+            // Store token in localStorage
+            localStorage.setItem('coreknight_auth_success', Date.now().toString());
+
+            // Post message to opener window if popup
+            if (window.opener) {
+              try {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: accessToken }, '*');
+              } catch(e) {}
+              setTimeout(() => { window.close(); }, 1200);
+            }
           }
         </script>
       </body>

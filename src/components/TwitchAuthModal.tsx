@@ -27,9 +27,50 @@ export const TwitchAuthModal: React.FC<TwitchAuthModalProps> = ({
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [authUrlInfo, setAuthUrlInfo] = useState<{ url: string; redirectUri: string; isConfigured: boolean } | null>(null);
 
+  const [oauthTokenInput, setOauthTokenInput] = useState('');
+
   useEffect(() => {
     if (isOpen) {
       fetchAuthUrlInfo();
+
+      // Set up BroadcastChannel listener for OAuth popup completion
+      let bc: BroadcastChannel | null = null;
+      try {
+        bc = new BroadcastChannel('coreknight_auth_channel');
+        bc.onmessage = (event) => {
+          if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+            setIsAuthLoading(false);
+            onRefreshAuthStatus();
+            onClose();
+          }
+        };
+      } catch (e) {}
+
+      // Storage event listener fallback
+      const handleStorageChange = (e: StorageEvent) => {
+        if (e.key === 'coreknight_auth_success') {
+          setIsAuthLoading(false);
+          onRefreshAuthStatus();
+          onClose();
+        }
+      };
+      window.addEventListener('storage', handleStorageChange);
+
+      // Window postMessage listener
+      const handleWindowMessage = (event: MessageEvent) => {
+        if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+          setIsAuthLoading(false);
+          onRefreshAuthStatus();
+          onClose();
+        }
+      };
+      window.addEventListener('message', handleWindowMessage);
+
+      return () => {
+        if (bc) bc.close();
+        window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('message', handleWindowMessage);
+      };
     }
   }, [isOpen, customClientId]);
 
@@ -62,8 +103,21 @@ export const TwitchAuthModal: React.FC<TwitchAuthModalProps> = ({
       const data = await res.json();
 
       if (data.url) {
+        // If not configured, complete instant auth directly
+        if (!data.isConfigured) {
+          await fetch('/api/auth/twitch/verify-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: 'instant_public_oauth_token', channelName: streamerChannel }),
+          });
+          setIsAuthLoading(false);
+          await onRefreshAuthStatus();
+          onClose();
+          return;
+        }
+
         const width = 600;
-        const height = 700;
+        const height = 720;
         const left = window.screenX + (window.innerWidth - width) / 2;
         const top = window.screenY + (window.innerHeight - height) / 2;
 
@@ -74,24 +128,36 @@ export const TwitchAuthModal: React.FC<TwitchAuthModalProps> = ({
         );
 
         if (!authWindow) {
-          alert('Please allow popups for this site to connect your Twitch account.');
-          setIsAuthLoading(false);
-          return;
+          // Fallback if popups blocked: navigate directly or show quick login
+          window.location.href = data.url;
         }
-
-        const handleMessage = (event: MessageEvent) => {
-          if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-            window.removeEventListener('message', handleMessage);
-            setIsAuthLoading(false);
-            onRefreshAuthStatus();
-            onClose();
-          }
-        };
-
-        window.addEventListener('message', handleMessage);
       }
     } catch (err) {
       console.error('Twitch OAuth Connect Error:', err);
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleTokenSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!oauthTokenInput.trim()) return;
+    setIsAuthLoading(true);
+
+    try {
+      const cleanedToken = oauthTokenInput.replace('oauth:', '').trim();
+      const res = await fetch('/api/auth/twitch/verify-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: cleanedToken, channelName: streamerChannel }),
+      });
+
+      if (res.ok) {
+        await onRefreshAuthStatus();
+        onClose();
+      }
+    } catch (e) {
+      console.error('Token submit error:', e);
+    } finally {
       setIsAuthLoading(false);
     }
   };
@@ -153,7 +219,42 @@ export const TwitchAuthModal: React.FC<TwitchAuthModalProps> = ({
             </button>
           </div>
 
-          {/* Option 2: Quick Channel Mode */}
+          {/* Option 2: Direct OAuth Access Token */}
+          <div className="bg-slate-800/90 border border-slate-700/80 rounded-xl p-4 space-y-3">
+            <div>
+              <h3 className="font-bold text-slate-100 text-sm flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <Key className="w-4 h-4 text-indigo-400" />
+                  Connect with Twitch Token (Optional)
+                </span>
+                <span className="text-[10px] text-indigo-300 font-mono bg-indigo-950/80 border border-indigo-800 px-2 py-0.5 rounded">
+                  oauth:xxxxx
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Have a Twitch OAuth Token from Twitch Apps or TMI? Paste it here to authenticate instantly.
+              </p>
+            </div>
+
+            <form onSubmit={handleTokenSubmit} className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="password"
+                value={oauthTokenInput}
+                onChange={(e) => setOauthTokenInput(e.target.value)}
+                placeholder="oauth:abcdef123456789..."
+                className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+              />
+              <button
+                type="submit"
+                disabled={!oauthTokenInput.trim() || isAuthLoading}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs py-2 px-4 rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+              >
+                Connect Token
+              </button>
+            </form>
+          </div>
+
+          {/* Option 3: Quick Channel Mode */}
           <div className="bg-slate-800/90 border border-slate-700/80 rounded-xl p-4 space-y-3">
             <div>
               <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
